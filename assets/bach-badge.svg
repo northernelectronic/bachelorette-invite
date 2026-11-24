@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200">
+  <defs>
+    <radialGradient id="bg" cx="50%" cy="38%" r="70%"><stop offset="0" stop-color="#6a1b8a"/><stop offset="1" stop-color="#1e0830"/></radialGradient>
+    <linearGradient id="gold" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff0b0"/><stop offset="1" stop-color="#e0a63a"/></linearGradient>
+    <linearGradient id="hrt" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ff8fc8"/><stop offset="1" stop-color="#e0157a"/></linearGradient>
+    <filter id="glow" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="4" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+  </defs>
+  <rect x="4" y="4" width="192" height="192" rx="40" fill="url(#bg)"/>
+  <rect x="12" y="12" width="176" height="176" rx="33" fill="none" stroke="#ff5db4" stroke-width="5" filter="url(#glow)"/>
+  <path d="M100 160 C 40 120, 34 78, 60 62 C 80 50, 96 62, 100 74 C 104 62, 120 50, 140 62 C 166 78, 160 120, 100 160 Z" fill="url(#hrt)" stroke="#2a0a1e" stroke-width="5" filter="url(#glow)"/>
+  <path d="M68 80 C 72 70, 82 66, 90 70" stroke="#ffd6ec" stroke-width="5" fill="none" stroke-linecap="round"/>
+  <path d="M66 52 L60 26 L80 42 L100 18 L120 42 L140 26 L134 52 Z" fill="url(#gold)" stroke="#2a0a1e" stroke-width="4" stroke-linejoin="round"/>
+  <circle cx="100" cy="34" r="5" fill="#7fe7ff" stroke="#2a0a1e" stroke-width="2"/>
+  <circle cx="78" cy="44" r="3.5" fill="#ff5db4"/><circle cx="122" cy="44" r="3.5" fill="#ff5db4"/>
+  <g transform="translate(100 112) rotate(-12)"><path d="M-22 -8 q8 -10 14 -2 l4 18 q-12 6 -20 -4 z M-8 -10 l2 -14 q6 -2 6 4 l-2 14 z M0 -10 l4 -16 q6 0 5 6 l-3 14 z M8 -8 l5 -12 q6 1 4 7 l-4 11 z" fill="#ffffff" stroke="#2a0a1e" stroke-width="3" stroke-linejoin="round"/></g>
+  <text x="100" y="184" text-anchor="middle" font-family="Arial Black, Arial, sans-serif" font-weight="900" font-size="17" fill="url(#gold)" letter-spacing="2">BRIDE SQUAD</text>
+</svg>

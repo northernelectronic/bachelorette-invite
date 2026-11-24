@@ -1,0 +1,20 @@
+{
+  "_comment": "SAMPLE invite. The bride, host, date, time and venue below are placeholders for a demo, not a real event.",
+  "sample": true,
+  "hostName": "The Maid of Honour",
+  "brideName": "Jess",
+  "landingLine": "The Maid of Honour is sending you an invite. Pass the level to find out what it is!",
+  "landingSubline": "Fair warning: this level fights back.",
+  "howToPlay": [],
+  "eventName": "Jess's Last Fling Before the Ring",
+  "date": "Saturday, June 12, 2027 (sample)",
+  "time": "8:00 PM till late (sample)",
+  "location": "The Velvet Room, King St W, Toronto (sample venue)",
+  "extraNote": "Dress code: anything sparkly. Tiaras encouraged. Hunks not invited.",
+  "rsvpEndpoint": "local",
+  "rsvpStorageKey": "playfair-bachelorette-sample-rsvp",
+  "madeBy": "Playfair Fun & Games",
+  "tagline": "You're Invited to Play",
+  "failsBeforeAssist": 3,
+  "privacyNote": "No ads. No tracking. The only information collected is what you type in the RSVP, if you choose to send it."
+}
