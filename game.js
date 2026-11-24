@@ -595,6 +595,8 @@
 
     // spawns
     const b = s.bride, hold = b.hold > 0;
+    // Mr. Sexy must be at the rope whenever Jess is heading for the VIP (also after a retry from the last checkpoint)
+    if (b.wp >= 5 && !s.bossSpawned && !s.ropeOpen) spawnBoss();
     s.spawnT -= dt;
     const alive = s.hunks.filter((e) => e.state !== "spun" && e.type !== "boss").length;
     const maxA = Math.round(([0, 4, 4, 5, 5, 3, 0][b.wp] + (hold ? 2 : 0)) * (easy ? 0.6 : 1));

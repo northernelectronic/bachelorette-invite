@@ -19,3 +19,8 @@ Run locally with `python3 -m http.server 8781`. The page is noindex/nofollow, wi
 - Hunks now dance on the beat while they approach and while they hang around: hip sways, body rolls, finger points, shoulder shimmies and the disco point. Each hunk switches moves every 8 beats. Clothed background clubbers dance around the club too.
 - A 16-bar, 124 BPM four-on-the-floor house loop (kick, clap, hats, off-beat bass, chord stabs with sidechain pump) is synthesised on the device, so there are no audio files and nothing to license. It's rendered while the landing screen is up and starts after the first tap (iOS unlock). It plays low under the SFX and voices, dips during the fail gag and on the reveal, and follows the mute toggle. Dancers, dance-floor tiles and lights all sync to the music clock.
 - The service worker cache is bumped to `bachelorette-invite-v2`.
+
+## v3: ending fix
+
+- Fixed a softlock that stopped the game from ever ending. If you lost at the last checkpoint (Jess heading for the VIP rope) and retried, Mr. Sexy was never spawned again. He used to appear only when the karaoke hold finished, so Jess danced at the rope forever. He now spawns any time Jess is heading for the VIP rope and the rope is still closed.
+- The service worker cache is bumped to `bachelorette-invite-v3`.
