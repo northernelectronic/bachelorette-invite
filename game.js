@@ -84,17 +84,92 @@
     boss: () => { tone(110, 0.6, "sawtooth", 0.12, 55); tone(165, 0.6, "sawtooth", 0.08, 82); },
     facepalm: () => { noise(0.07, 0.6, 1800, 0.7); tone(150, 0.12, "sine", 0.3, 60); },
   };
-  // club beat (very light, 124 bpm eighths)
-  let beatT = 0, beatN = 0;
-  const BASS = [55, 55, 65.4, 49];
-  function musicTick(dt) {
-    if (!actx || muted || !state || !(state.phase === "play" || state.phase === "intro")) return;
-    beatT -= dt; if (beatT > 0) return; beatT += 0.242; if (beatT < -0.3) beatT = 0.242;
-    const n = beatN++;
-    if (n % 2 === 0) tone(120, 0.13, "sine", 0.2, 42); else noise(0.035, 0.045, 9000, 0.8);
-    if (n % 8 === 4) noise(0.09, 0.07, 1500, 1);
-    if (n % 4 === 3) tone(BASS[(n >> 4) % 4] * 2, 0.2, "triangle", 0.06);
+  // ===== house music: a 16-bar, 124 BPM four-on-the-floor loop synthesised on the device (no files, royalty-free) =====
+  const BPM = 124, BEAT = 60 / BPM, MUSIC_VOL = 0.22;
+  let musicBuf = null, musicSrc = null, musicGain = null, musicT0 = 0, musicLevel = 1, musicStarting = false;
+  let houseData = null;
+  function synthHouse() {
+    if (houseData) return houseData;
+    const SR = 24000, bars = 16, beats = bars * 4, B = BEAT * SR, N = Math.round(beats * B), d = new Float32Array(N), sc = new Float32Array(N);
+    let seed = 12345; const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647) * 2 - 1;
+    const add = (i, v) => { d[i % N] += v; }, addS = (i, v) => { sc[i % N] += v; };
+    const TAU = Math.PI * 2;
+    // kick on every beat
+    for (let b = 0; b < beats; b++) {
+      const s0 = Math.round(b * B); let ph = 0;
+      for (let j = 0, L = 0.3 * SR; j < L; j++) { const t = j / SR, f = 47 + 115 * Math.exp(-t / 0.032); ph += TAU * f / SR; add(s0 + j, Math.sin(ph) * Math.exp(-t / 0.17) * 0.95 + (j < 50 ? rnd() * 0.3 * (1 - j / 50) : 0)); }
+    }
+    // hats (high-passed noise)
+    const hat = (s0, dec, vol) => { let prev = 0; for (let j = 0, L = dec * SR * 4; j < L; j++) { const n = rnd(), h = n - prev; prev = n; add(s0 + j, h * vol * Math.exp(-j / (dec * SR))); } };
+    for (let b = 0; b < beats; b++) {
+      const s0 = b * B; hat(Math.round(s0 + B / 2), 0.055, 0.2);
+      hat(Math.round(s0 + B / 4), 0.012, 0.06); hat(Math.round(s0 + 3 * B / 4), 0.012, 0.075);
+    }
+    // clap on 2 and 4
+    for (let b = 1; b < beats; b += 2) {
+      const s0 = Math.round(b * B); let lp1 = 0, lp2 = 0;
+      for (let j = 0, L = 0.22 * SR; j < L; j++) {
+        const t = j / SR, n = rnd(); lp1 += (n - lp1) * 0.55; lp2 += (n - lp2) * 0.12; const bp = lp1 - lp2;
+        const env = (t < 0.03 ? (Math.exp(-((t % 0.01) / 0.004))) : 0) * 0.8 + Math.exp(-t / 0.07) * (t > 0.02 ? 1 : 0.3);
+        add(s0 + j, bp * env * 0.55);
+      }
+    }
+    // chords (Am7, Fmaj7, Cmaj7, G6), two bars each, played twice
+    const CH = [[220, 261.63, 329.63, 392], [174.61, 220, 261.63, 329.63], [261.63, 329.63, 392, 246.94], [196, 246.94, 293.66, 329.63]];
+    const ROOT = [55, 43.65, 65.41, 49];
+    for (let bar = 0; bar < bars; bar++) {
+      const ci = (bar >> 1) % 4, cut = 700 + 1500 * (0.5 - 0.5 * Math.cos(TAU * bar / bars)), a = 1 - Math.exp(-TAU * cut / SR);
+      // stabs
+      const pos = bar % 2 ? [1.5, 2.75, 3.5] : [0.5, 1.5, 3.5];
+      for (const pb of pos) {
+        const s0 = Math.round((bar * 4 + pb) * B);
+        CH[ci].forEach((f, vi) => { let p1 = vi * 0.13, p2 = vi * 0.37, lp = 0;
+          for (let j = 0, L = 0.26 * SR; j < L; j++) { const t = j / SR; p1 = (p1 + f / SR) % 1; p2 = (p2 + f * 1.006 / SR) % 1; const saw = (p1 * 2 - 1) + (p2 * 2 - 1); lp += (saw - lp) * a * (0.6 + 0.8 * Math.exp(-t / 0.05)); addS(s0 + j, lp * 0.045 * Math.exp(-t / 0.09)); } });
+      }
+      // off-beat bass
+      for (let k = 0; k < 4; k++) {
+        const s0 = Math.round((bar * 4 + k + 0.5) * B), f = ROOT[ci] * (k === 3 && bar % 2 ? 2 : 1);
+        let p = 0, q = 0, lp = 0;
+        for (let j = 0, L = 0.21 * SR; j < L; j++) { const t = j / SR; p = (p + f / SR) % 1; q += TAU * f / SR; lp += ((p * 2 - 1) - lp) * 0.09; const env = Math.min(1, j / 60) * Math.exp(-t / 0.16); addS(s0 + j, (lp * 0.35 + Math.sin(q) * 0.42) * env); }
+      }
+    }
+    // riser into the loop point
+    { const s0 = Math.round((beats - 4) * B), L = Math.round(4 * B); let lp = 0; for (let j = 0; j < L; j++) { const x = j / L; lp += (rnd() - lp) * (0.02 + 0.5 * x * x); add(s0 + j, lp * 0.12 * x * x); } }
+    // sidechain pump + mix + soft clip
+    let peak = 0;
+    for (let i = 0; i < N; i++) { const tb = (i % B) / SR; d[i] += sc[i] * (1 - 0.7 * Math.exp(-tb / 0.075)); d[i] = Math.tanh(d[i] * 1.1); peak = Math.max(peak, Math.abs(d[i])); }
+    const k = 0.9 / (peak || 1);
+    for (let i = 0; i < N; i++) d[i] *= k;
+    return (houseData = { d, SR });
   }
+  function buildHouseLoop() {
+    const h = synthHouse(), buf = actx.createBuffer(1, h.d.length, h.SR);
+    if (buf.copyToChannel) buf.copyToChannel(h.d, 0); else buf.getChannelData(0).set(h.d);
+    return buf;
+  }
+  // pre-render the loop while the guest reads the landing screen
+  setTimeout(() => { try { synthHouse(); } catch (e) {} }, 1200);
+  function applyMusicLevel() { if (musicGain && actx) musicGain.gain.setTargetAtTime(muted ? 0 : MUSIC_VOL * musicLevel, actx.currentTime, 0.3); }
+  function setMusicLevel(l) { if (l === musicLevel) return; musicLevel = l; applyMusicLevel(); }
+  function startMusic() {
+    if (!actx || musicSrc || musicStarting) return;
+    musicStarting = true;
+    setTimeout(() => {
+      try {
+        if (!musicBuf) musicBuf = buildHouseLoop();
+        musicGain = actx.createGain(); musicGain.gain.value = 0; musicGain.connect(master);
+        const src = actx.createBufferSource(); src.buffer = musicBuf; src.loop = true; src.connect(musicGain);
+        musicT0 = actx.currentTime + 0.05; src.start(musicT0); musicSrc = src; applyMusicLevel();
+      } catch (e) {}
+      musicStarting = false;
+    }, 30);
+  }
+  // beats since the music started (falls back to a free-running clock), used to sync dancers and lights
+  function musicBeat() {
+    if (actx && musicSrc) return Math.max(0, (actx.currentTime - ((actx.outputLatency || 0) + (actx.baseLatency || 0)) - musicT0) / BEAT);
+    return performance.now() / 1000 / BEAT;
+  }
+  function musicTick() { if (actx && !musicSrc) startMusic(); }
 
   /* ================= VOICE CLIPS (offline Kokoro TTS) ================= */
   const HUNK_LINES = [["pu_baby", "Heyyy, baby."], ["pu_sign", "What's your sign?"], ["pu_around", "You from around here?"], ["pu_friend", "Who's your friend?"],
@@ -338,7 +413,7 @@
     const hp = tp.hp * (easy && type === "boss" ? 0.5 : 1);
     const nvar = { hunk: 2, dasher: 2, talker: 1, grabber: 2, boss: 1 }[type];
     return { type, x, y, vx: 0, vy: 0, hp, maxHp: hp, r: tp.r, state: "chase", t: 0, flash: 0, walk: rand(0, 6), say: Math.random() < 0.4 ? SAYS[(Math.random() * SAYS.length) | 0] : "",
-      sayT: 1.4, vi: (Math.random() * nvar) | 0, door, stun: 0, slaps: 0, spin: 0, alpha: 1, zig: rand(0, 6), da: rand(0, 6.28), roseT: 2 };
+      sayT: 1.4, vi: (Math.random() * nvar) | 0, door, stun: 0, slaps: 0, spin: 0, alpha: 1, zig: rand(0, 6), da: rand(0, 6.28), roseT: 2, mv0: (Math.random() * 5) | 0, off: Math.random() < 0.5 ? 0 : 2 };
   }
   function spawnHunk(type, near) {
     computeFlow();
@@ -895,21 +970,39 @@
     boss: [{ pants: "#e8b83a", stripe: "#fff6c0", hair: "#141010", tie: "#ffcf5a", shades: true, sash: true }],
   };
   const HSK = { hunk: [SKIN[0], SKIN[2]], dasher: [SKIN[1], SKIN[3]], talker: [SKIN[2]], grabber: [SKIN[4], SKIN[1]], boss: [SKIN[1]] };
-  function drawHunk(g, type, vi, ph, mode) {
-    const st = HC[type][vi], skin = HSK[type][vi], sw = Math.sin(ph), bob = Math.abs(Math.cos(ph)) * 2.5;
+  // dance moves: 4 frames per move = 2 beats (frames 0 and 2 land on the beat)
+  const ON_HIP_L = (a) => a(36, 22, 90, 42, 100), ON_HIP_R = (a) => a(84, 98, 90, 78, 100);
+  const GROOVE = [
+    { name: "sway", hip: [-7, 0, 7, 0], lean: [0.06, 0, -0.06, 0],
+      arms: (a, f) => { a(36, 20, 86, 28, f === 0 ? 46 : 60); a(84, 100, 86, 92, f === 2 ? 46 : 60); } },
+    { name: "roll", hip: [0, 4, 0, -4], lean: [0, 0.05, 0, -0.05], dip: [6, 3, 0, 3],
+      arms: (a, f) => { a(36, 16, 42, 44, 22); a(84, 98, 86, 70, 70 + [0, 9, 18, 9][f]); } },
+    { name: "point", hip: [4, 0, -4, 0], lean: [-0.05, 0, 0.05, 0],
+      arms: (a, f) => { const o = f % 2 ? 6 : 0; if (f < 2) { a(84, 104, 58 + o, 116, 40 + o, false, true); ON_HIP_L(a); } else { a(36, 16, 58 + o, 4, 40 + o, false, true); ON_HIP_R(a); } } },
+    { name: "shimmy", hip: [2, -2, 2, -2], lean: [0.13, -0.13, 0.13, -0.13], legs: [[4, 0], [0, 4], [4, 0], [0, 4]],
+      arms: (a, f) => { const j = f % 2 ? 5 : -5; a(36, 14, 78, 4, 92 + j); a(84, 106, 78, 116, 92 - j); } },
+    { name: "disco", hip: [5, 5, -3, -3], lean: [-0.07, -0.07, 0.05, 0.05],
+      arms: (a, f) => { if (f < 2) a(84, 100, 46, 110, 12 + (f ? 6 : 0), false, true); else a(84, 78, 98, 40, 118 - (f === 3 ? 6 : 0), false, true); ON_HIP_L(a); } },
+  ];
+  function drawHunk(g, type, vi, ph, mode, mv) {
+    const st = HC[type][vi], skin = HSK[type][vi], gv = mode === "groove", f = gv ? ph & 3 : 0, GP = gv ? GROOVE[mv || 0] : null;
+    let sw = Math.sin(ph), bob = Math.abs(Math.cos(ph)) * 2.5;
+    const hip = gv ? GP.hip[f] : 0, lean = gv ? GP.lean[f] : 0;
+    if (gv) { sw = 0; bob = -(GP.dip ? GP.dip[f] : f % 2 === 0 ? 3.5 : 0); }
     const dark = mix(skin, "#000000", 0.28), light = mix(skin, "#ffffff", 0.3);
     g.translate(0, 4);
     const leg = (hx, lift, side) => {
-      const fx = hx + side * 3 + lift * 0.15, fy = 176 - lift;
-      limb(g, hx, 110, hx + side * 4, 145 - lift * 0.5, fx, fy - 6, st.pants, 17);
-      g.strokeStyle = st.stripe; g.lineWidth = 2.5; g.beginPath(); g.moveTo(hx + side * 8, 114); g.quadraticCurveTo(hx + side * 11, 145 - lift * 0.5, fx + side * 7, fy - 10); g.stroke();
+      const fx = hx + side * 3 + lift * 0.15, fy = 176 - lift, tx = hx + hip, ty = 110 - bob;
+      limb(g, tx, ty, hx + side * 4 + hip * 0.5 + (gv ? side * 3 : 0), 145 - lift * 0.5 - bob * 0.5, fx, fy - 6, st.pants, 17);
+      g.strokeStyle = st.stripe; g.lineWidth = 2.5; g.beginPath(); g.moveTo(tx + side * 8, ty + 4); g.quadraticCurveTo(hx + side * 11, 145 - lift * 0.5, fx + side * 7, fy - 10); g.stroke();
       if (type !== "grabber") { g.fillStyle = "#fff"; for (let k = 0; k < 4; k++) { g.beginPath(); g.arc(hx + side * (8.5 + k * 0.4), 122 + k * 13 - lift * 0.15 * k, 1.5, 0, 7); g.fill(); } }
       g.fillStyle = type === "boss" ? "#ffcf5a" : "#111"; g.beginPath(); g.ellipse(fx + side * 3, fy, 11, 5.5, 0, 0, 7); g.fill(); g.strokeStyle = INK; g.lineWidth = 2.5; g.stroke();
       g.fillStyle = "rgba(255,255,255,.4)"; g.beginPath(); g.ellipse(fx + side * 3 - 3, fy - 2, 4, 1.4, 0, 0, 7); g.fill();
     };
     const lift = mode === "walk" ? sw * 9 : mode === "dance" ? Math.max(0, sw) * 12 : mode === "spun" ? 14 : 0;
-    leg(51, Math.max(0, lift), -1); leg(69, mode === "spun" ? 4 : Math.max(0, -lift), 1);
-    g.save(); g.translate(0, -bob);
+    if (gv) { const L = GP.legs ? GP.legs[f] : [f === 0 ? 8 : 0, f === 2 ? 8 : 0]; leg(51, L[0], -1); leg(69, L[1], 1); }
+    else { leg(51, Math.max(0, lift), -1); leg(69, mode === "spun" ? 4 : Math.max(0, -lift), 1); }
+    g.save(); g.translate(hip, -bob); if (lean) { g.translate(60, 106); g.rotate(lean); g.translate(-60, -106); }
     // waistband
     g.fillStyle = type === "boss" ? "#ffcf5a" : mix(st.pants, "#000000", 0.3); rr(g, 40, 102, 40, 14, 5); g.fill(); g.strokeStyle = INK; g.lineWidth = 2.5; g.stroke();
     if (type === "boss") { g.fillStyle = "#fff6c0"; rr(g, 54, 103, 12, 12, 3); g.fill(); g.stroke(); g.fillStyle = INK; g.font = "900 9px Arial"; g.textAlign = "center"; g.textBaseline = "middle"; g.fillText("S", 60, 109.5); }
@@ -934,14 +1027,16 @@
       g.fillStyle = "#ffcf5a"; g.beginPath(); g.arc(60, 75, 5, 0, 7); g.fill(); g.strokeStyle = INK; g.lineWidth = 1.5; g.stroke();
     }
     // arms
-    const arm = (sx, ex, ey, hx, hy, big) => {
+    const arm = (sx, ex, ey, hx, hy, big, pt) => {
       limb(g, sx, 69, ex, ey, hx, hy, skin, big ? 13 : 11);
       g.fillStyle = "rgba(255,255,255,.25)"; g.beginPath(); g.ellipse((sx + ex) / 2, (69 + ey) / 2 - 2, 3.5, 2, 0, 0, 7); g.fill();
       const ang = Math.atan2(hy - ey, hx - ex);
       g.save(); g.translate(hx - Math.cos(ang) * 7, hy - Math.sin(ang) * 7); g.rotate(ang); g.fillStyle = "#fff"; rr(g, -3, -6.5, 6, 13, 2); g.fill(); g.strokeStyle = INK; g.lineWidth = 2; g.stroke(); g.restore();
+      if (pt) { g.save(); g.translate(hx, hy); g.rotate(ang); g.fillStyle = skin; g.strokeStyle = INK; g.lineWidth = 2; rr(g, 2, -2.6, 13, 5.2, 2.6); g.fill(); g.stroke(); g.restore(); }
       g.fillStyle = skin; g.beginPath(); g.arc(hx, hy, 7, 0, 7); g.fill(); g.strokeStyle = INK; g.lineWidth = 2.5; g.stroke();
     };
-    if (mode === "walk") { arm(36, 22, 86 - sw * 6, 26 + sw * 4, 64 - sw * 8, true); arm(84, 98, 86 + sw * 6, 94 - sw * 4, 64 + sw * 8, true); }
+    if (gv) GP.arms(arm, f);
+    else if (mode === "walk") { arm(36, 22, 86 - sw * 6, 26 + sw * 4, 64 - sw * 8, true); arm(84, 98, 86 + sw * 6, 94 - sw * 4, 64 + sw * 8, true); }
     else if (mode === "dance") { arm(36, 20, 52, 30 + sw * 8, 24); arm(84, 100, 52, 90 + sw * 8, 24); }
     else if (mode === "spun") { arm(36, 16, 60, 6, 44); arm(84, 104, 76, 114, 88); }
     else if (mode === "carry") { arm(36, 28, 90, 44, 84, true); arm(84, 92, 90, 76, 84, true); }
@@ -975,7 +1070,7 @@
         g.fillStyle = "#0a0a12"; rr(g, 45, 29, 13, 9, 3); g.fill(); rr(g, 62, 29, 13, 9, 3); g.fill(); g.strokeStyle = INK; g.lineWidth = 2; g.beginPath(); g.moveTo(58, 32); g.lineTo(62, 32); g.stroke();
         g.fillStyle = "rgba(255,255,255,.7)"; g.fillRect(47, 30.5, 4, 2); g.fillRect(64, 30.5, 4, 2);
       } else {
-        const wink = mode === "dance" && sw > 0.3;
+        const wink = (mode === "dance" && sw > 0.3) || (gv && f === 1 && mv !== 1);
         [53, 67].forEach((x, i) => {
           if (wink && i === 1) { g.strokeStyle = INK; g.lineWidth = 2.2; g.beginPath(); g.arc(x, 35, 3.5, Math.PI * 1.1, Math.PI * 1.9); g.stroke(); return; }
           g.fillStyle = "#fff"; g.beginPath(); g.ellipse(x, 34.5, 4, 3.6, 0, 0, 7); g.fill(); g.strokeStyle = INK; g.lineWidth = 1.5; g.stroke();
@@ -993,6 +1088,47 @@
         g.strokeStyle = "#8a0820"; g.lineWidth = 1.2; g.beginPath(); g.arc(89, 39, 3, 0, 5); g.stroke();
       }
     }
+    g.restore();
+  }
+
+  /* ---- background clubbers (clothed, decorative) ---- */
+  const CLUBLOOK = [
+    { skin: SKIN[1], hair: "#2a1a10", top: "#ffcf5a", bottom: "#ffcf5a", dress: true, long: true, sparkle: true },
+    { skin: SKIN[3], hair: "#141010", top: "#2ad0c0", bottom: "#2a3a6a", cap: "#ff3f9a" },
+    { skin: SKIN[0], hair: "#c0503a", top: "#9a4aff", bottom: "#1a1a24", bun: true, sticks: true },
+    { skin: SKIN[4], hair: "#3a2010", top: "#f4f4f8", bottom: "#3a3a48", curly: true },
+  ];
+  function drawClubber(g, look, f) {
+    const L = CLUBLOOK[look], hip = [-5, 0, 5, 0][f], dip = f % 2 === 0 ? 4 : 0, dark = mix(L.skin, "#000000", 0.25);
+    g.translate(0, 8);
+    // legs
+    [[51, -1], [69, 1]].forEach(([hx, side], i) => { const lift = (f === 0 && i === 0) || (f === 2 && i === 1) ? 7 : 0;
+      limb(g, hx + hip, 112 + dip, hx + side * 3 + hip * 0.4, 146 - lift * 0.5, hx + side * 2, 172 - lift, L.dress ? L.skin : L.bottom, L.dress ? 9 : 15);
+      g.fillStyle = L.dress ? "#ff3f9a" : "#f4f4f8"; g.strokeStyle = INK; g.lineWidth = 2.5; g.beginPath(); g.ellipse(hx + side * 4, 176 - lift, 9, 5, 0, 0, 7); g.fill(); g.stroke(); });
+    g.save(); g.translate(hip, dip);
+    // arms
+    const up = [[1, 1], [0.5, 0.5], [1, 0], [0.5, 0.5]][f];
+    const arm = (sx, side, u) => { const hx = sx + side * (22 - u * 14), hy = 92 - u * 74, ex = sx + side * 18, ey = 74 - u * 22;
+      limb(g, sx, 70, ex, ey, hx, hy, L.skin, 9); g.fillStyle = L.skin; g.strokeStyle = INK; g.lineWidth = 2.2; g.beginPath(); g.arc(hx, hy, 6, 0, 7); g.fill(); g.stroke();
+      if (L.sticks) { g.save(); g.translate(hx, hy); g.rotate(side * 0.5); g.fillStyle = side < 0 ? "#7cff5a" : "#4ae0ff"; rr(g, -2.5, -22, 5, 22, 2.5); g.fill(); g.restore(); } };
+    arm(40, -1, up[0]); arm(80, 1, up[1]);
+    // body
+    g.strokeStyle = INK; g.lineWidth = 3; g.fillStyle = L.top;
+    if (L.dress) { g.beginPath(); g.moveTo(44, 64); g.lineTo(76, 64); g.lineTo(84, 124); g.quadraticCurveTo(60, 130, 36, 124); g.closePath(); g.fill(); g.stroke(); }
+    else { rr(g, 38, 62, 44, 50, 12); g.fill(); g.stroke(); g.fillStyle = L.bottom; rr(g, 40, 104, 40, 14, 5); g.fill(); g.stroke(); }
+    if (L.sparkle) { g.fillStyle = "rgba(255,255,255,.75)"; [[50, 80], [66, 92], [56, 108], [72, 114], [62, 72]].forEach(([x, y]) => { g.beginPath(); g.arc(x, y, 1.8, 0, 7); g.fill(); }); }
+    // head
+    g.fillStyle = L.skin; rr(g, 54, 52, 12, 12, 4); g.fill(); g.stroke();
+    if (L.long) { g.fillStyle = L.hair; g.beginPath(); g.ellipse(60, 46, 21, 26, 0, 0, 7); g.fill(); g.lineWidth = 2.5; g.stroke(); }
+    g.fillStyle = L.skin; g.lineWidth = 2.5; g.beginPath(); g.ellipse(60, 38, 15, 17, 0, 0, 7); g.fill(); g.stroke();
+    g.fillStyle = L.hair; g.beginPath();
+    if (L.curly) { for (let i = 0; i < 7; i++) { g.moveTo(47 + i * 4.5 + 5, 24); g.arc(47 + i * 4.5, 24 + Math.sin(i) * 2, 5, 0, 7); } g.fill(); }
+    else { g.moveTo(45, 36); g.quadraticCurveTo(44, 18, 60, 19); g.quadraticCurveTo(76, 18, 75, 36); g.quadraticCurveTo(70, 25, 60, 26); g.quadraticCurveTo(50, 26, 45, 36); g.closePath(); g.fill(); g.stroke(); }
+    if (L.bun) { g.beginPath(); g.arc(60, 14, 8, 0, 7); g.fill(); g.stroke(); }
+    if (L.cap) { g.fillStyle = L.cap; g.beginPath(); g.moveTo(44, 28); g.quadraticCurveTo(45, 14, 60, 14); g.quadraticCurveTo(75, 14, 76, 28); g.closePath(); g.fill(); g.stroke(); rr(g, 58, 24, 26, 5, 2.5); g.fill(); g.stroke(); }
+    g.strokeStyle = INK; g.lineWidth = 2; [53, 67].forEach((x) => { g.beginPath(); g.arc(x, 38, 3, Math.PI * 1.1, Math.PI * 1.9); g.stroke(); });
+    g.fillStyle = "#fff"; g.beginPath(); g.moveTo(53, 44); g.quadraticCurveTo(60, 48, 67, 44); g.quadraticCurveTo(64, 51, 60, 51); g.quadraticCurveTo(56, 51, 53, 44); g.closePath(); g.fill(); g.stroke();
+    g.fillStyle = "rgba(255,90,140,.35)"; g.beginPath(); g.arc(49, 44, 3, 0, 7); g.arc(71, 44, 3, 0, 7); g.fill();
     g.restore();
   }
   function drawBride(g, ph, mode) {
@@ -1194,16 +1330,17 @@
       LM[j * LMW + i] = pack(r * m, g * m, b * m);
     }
     // sprites
+    if (!fpS.spr || !fpS.spr.bride) {
     fpS.spr = {};
     Object.keys(HC).forEach((type) => HC[type].forEach((_, vi) => {
-      const walk = [], dance = [];
-      for (let i = 0; i < 4; i++) walk.push(outlined(120, 190, (g) => drawHunk(g, type, vi, i * Math.PI / 2, "walk")));
-      for (let i = 0; i < 2; i++) dance.push(outlined(120, 190, (g) => drawHunk(g, type, vi, i * Math.PI + Math.PI / 2, "dance")));
-      fpS.spr["h_" + type + vi] = { walk, dance, carry: outlined(120, 190, (g) => drawHunk(g, type, vi, 0, "carry")), spun: outlined(120, 190, (g) => drawHunk(g, type, vi, 0, "spun")) };
+      const groove = GROOVE.map((_, mv) => [0, 1, 2, 3].map((f) => outlined(120, 190, (g) => drawHunk(g, type, vi, f, "groove", mv))));
+      fpS.spr["h_" + type + vi] = { groove, carry: outlined(120, 190, (g) => drawHunk(g, type, vi, 0, "carry")), spun: outlined(120, 190, (g) => drawHunk(g, type, vi, 0, "spun")) };
     }));
+    fpS.spr.club = CLUBLOOK.map((_, look) => [0, 1, 2, 3].map((f) => outlined(120, 190, (g) => drawClubber(g, look, f))));
     fpS.spr.bride = { dance: [0, 1, 2, 3].map((i) => outlined(120, 190, (g) => drawBride(g, i * Math.PI / 2 + 0.6, "dance"))), walk: [0, 1].map((i) => outlined(120, 190, (g) => drawBride(g, i * Math.PI, "walk"))),
       grabbed: [0, 1].map((i) => outlined(120, 190, (g) => drawBride(g, i * Math.PI + Math.PI / 2, "grabbed"))) };
     ["sofa", "table", "speaker", "stool", "rope", "disco", "marg", "bubbly"].forEach((k) => (fpS.spr[k] = propSprite(k)));
+    }
     fpS.glowPink = glowSprite(255, 70, 180); fpS.glowCyan = glowSprite(70, 220, 255); fpS.glowPurple = glowSprite(170, 100, 255); fpS.glowGold = glowSprite(255, 200, 90); fpS.glowWhite = glowSprite(255, 240, 250); fpS.glowGreen = glowSprite(150, 255, 90);
     // minimap
     mmCanvas = mkC(MW * T * MMS * 2, MH * T * MMS * 2);
@@ -1223,13 +1360,16 @@
     fpS.img = fpS.cx.createImageData(fpS.IW, fpS.IH); fpS.buf = new Uint32Array(fpS.img.data.buffer); fpS.z = new Float32Array(fpS.IW);
   }
   const danceCol = new Uint32Array(MW * MH);
+  // background clubbers: [x, y, look, frame offset]
+  const CLUBBERS = [[6.8, 16.9, 0, 0], [7.5, 19.7, 1, 2], [9.1, 21.5, 2, 0], [15.9, 21.3, 3, 2], [16.9, 19.6, 0, 2], [13.9, 21.6, 1, 0], [9.0, 16.6, 3, 0],
+    [20.5, 9.3, 2, 2], [17.1, 12.6, 1, 0], [20.6, 6.4, 0, 0], [16.7, 6.7, 3, 2], [4.3, 14.6, 2, 0], [21.0, 15.0, 1, 2], [5.0, 20.0, 3, 2], [4.6, 17.3, 1, 0], [19.8, 20.3, 2, 2], [13.2, 15.3, 0, 2], [9.3, 20.5, 2, 2], [14.5, 20.9, 3, 0], [9.9, 17.0, 1, 0], [13.5, 16.8, 0, 2]];
   function fpRenderWorld() {
     const s = state, IW = fpS.IW, IH = fpS.IH, buf = fpS.buf, zb = fpS.z;
     const ca = Math.cos(cam.ang), sa = Math.sin(cam.ang), plx = -sa * TANF, ply = ca * TANF, cz = cam.z;
     const proj = (IW / 2) / TANF, hor = Math.round(IH * (0.5 - cam.pitch));
     fpS.hor = hor; fpS.proj = proj;
     // animated dance floor palette
-    const beat = Math.floor(s.t * 2.06);
+    const beat = Math.floor(musicBeat());
     for (const i of danceTiles) {
       const x = i % MW, y = (i / MW) | 0, ph = (x + y + beat) % 6, on = ((x * 3 + y * 5 + beat) % 4) !== 0;
       const c = DPAL[(ph + (x & 1) * 2) % 6], m = on ? 1 : 0.28;
@@ -1370,8 +1510,8 @@
     const set = fpS.spr["h_" + o.type + (o.vi || 0)] || fpS.spr["h_" + o.type + "0"];
     if (o.state === "spun") return set.spun;
     if (o.state === "carry") return set.carry;
-    if (o.state === "dance") return set.dance[Math.floor(Math.abs(o.walk) / Math.PI) % 2];
-    return set.walk[Math.floor(Math.abs(o.walk) / (Math.PI / 2)) % 4];
+    const mb = musicBeat() + (o.off || 0) / 2;
+    return set.groove[((o.mv0 || 0) + Math.floor(mb / 8)) % GROOVE.length][Math.floor(mb * 2) & 3];
   }
   function fpRender(now) {
     const s = state, p = s.p;
@@ -1383,15 +1523,17 @@
     ctx.setTransform(dpr, 0, 0, dpr, shx, shy);
     const hi = fpS.tier < 2;
     // moving dance-floor light spots + disco sparkle
+    const mbt = musicBeat(), pulse = Math.exp(-(mbt % 1) * 3.2);
     if (hi) {
-      for (let i = 0; i < 6; i++) { const a = now * (0.6 + i * 0.13) + i * 1.7, gx = 11.8 * T + Math.cos(a) * (2.4 + (i % 3)) * T, gy = 18.8 * T + Math.sin(a * 1.3) * 2.2 * T; fpGlow([fpS.glowPink, fpS.glowCyan, fpS.glowPurple][i % 3], gx, gy, 2, 120, 0.45); }
-      fpGlow(fpS.glowWhite, 11.5 * T, 18.5 * T, WALL_H - 22, 70, 0.5 + 0.2 * Math.sin(now * 7));
+      for (let i = 0; i < 6; i++) { const a = mbt * 0.9 * (0.6 + i * 0.13) + i * 1.7, gx = 11.8 * T + Math.cos(a) * (2.4 + (i % 3)) * T, gy = 18.8 * T + Math.sin(a * 1.3) * 2.2 * T; fpGlow([fpS.glowPink, fpS.glowCyan, fpS.glowPurple][(i + Math.floor(mbt)) % 3], gx, gy, 2, 120, 0.25 + 0.35 * pulse); }
+      fpGlow(fpS.glowWhite, 11.5 * T, 18.5 * T, WALL_H - 22, 70, 0.35 + 0.45 * pulse);
       fpGlow(fpS.glowPink, 18.5 * T, 3.6 * T, 60, 160, 0.35); fpGlow(fpS.glowGold, 2.6 * T, 5 * T, 60, 150, 0.35);
     }
     const list = [];
     for (const pr of fpProps) { if (pr.kind === "rope" && s.ropeOpen && s.ropeAnim <= 0) continue; list.push({ x: pr.x, y: pr.y, t: "prop", o: pr }); }
     for (const k of s.pickups) list.push({ x: k.x, y: k.y, t: "pick", o: k });
     for (const e of s.hunks) list.push({ x: e.x, y: e.y, t: "hunk", o: e });
+    for (const c of CLUBBERS) list.push({ x: c[0] * T, y: c[1] * T, t: "club", o: c });
     const b = s.bride;
     if (!b.carrier) list.push({ x: b.x, y: b.y, t: "bride", o: b });
     for (const f of s.foams) list.push({ x: f.x, y: f.y, t: "foam", o: f });
@@ -1433,8 +1575,13 @@
           if (o.hp < o.maxHp && o.type !== "boss") { const bw = Math.max(24, r.w * 0.6); ctx.fillStyle = "rgba(0,0,0,.55)"; rr(ctx, r.x - bw / 2, r.top - 10, bw, 6, 3); ctx.fill(); ctx.fillStyle = "#ff5db4"; rr(ctx, r.x - bw / 2, r.top - 10, bw * clamp(o.hp / o.maxHp, 0, 1), 6, 3); ctx.fill(); }
           if (o.say && o.sayT > 0 && pr.fw < 460) bubble(ctx, r.x, r.top - 12, o.say, fa * Math.min(1, o.sayT * 3));
         }
+      } else if (it.t === "club") {
+        if (pr.fw > 760) continue;
+        const img = fpS.spr.club[o[2]][Math.floor(mbt * 2 + o[3]) & 3], hh = 66, ww = hh * 120 / 190;
+        if (zVisible(pr.sx, pr.fw)) { ctx.globalAlpha = 0.35 * fa; ctx.fillStyle = "#000"; ctx.beginPath(); ctx.ellipse(pr.sx, pr.hc + cam.z * pr.sc, ww * 0.35 * pr.sc, 4 * pr.sc, 0, 0, 7); ctx.fill(); ctx.globalAlpha = 1; }
+        fpBlit(img, pr, 0, ww, hh, fa * 0.92);
       } else if (it.t === "bride") {
-        const set = fpS.spr.bride, img = o.state === "walk" ? set.walk[Math.floor(o.dph / Math.PI) % 2] : set.dance[Math.floor(o.dph / (Math.PI / 2)) % 4];
+        const set = fpS.spr.bride, img = o.state === "walk" ? set.walk[Math.floor(o.dph / Math.PI) % 2] : set.dance[Math.floor(mbt * 2) & 3];
         if (hi) fpGlow(fpS.glowWhite, o.x, o.y, 30, 90, 0.35);
         if (zVisible(pr.sx, pr.fw)) { ctx.globalAlpha = 0.4 * fa; ctx.fillStyle = "#000"; ctx.beginPath(); ctx.ellipse(pr.sx, pr.hc + cam.z * pr.sc, 18 * pr.sc, 5 * pr.sc, 0, 0, 7); ctx.fill(); ctx.globalAlpha = 1; }
         const r = fpBlit(img, pr, 0, 66 * 120 / 190, 66, fa);
@@ -1960,11 +2107,12 @@
     }
     if (dt > 0.05) dt = 0.05; if (dt < 0) dt = 0;
     if (state && !state.paused) update(dt);
+    if (state) setMusicLevel(state.phase === "fail" ? 0.3 : 1);
     render(t);
   }
   function startLoop() { if (running) return; running = true; last = performance.now() / 1000; raf = requestAnimationFrame(frame); }
   function stopLoop() { running = false; cancelAnimationFrame(raf); }
-  document.addEventListener("visibilitychange", () => { last = performance.now() / 1000; for (const k in keys) keys[k] = false; });
+  document.addEventListener("visibilitychange", () => { try { if (actx) { if (document.hidden) actx.suspend(); else actx.resume(); } } catch (e) {} last = performance.now() / 1000; for (const k in keys) keys[k] = false; });
   function startLevel() {
     state = newState(0); placePickups(state); winConf = [];
     state.phase = "intro"; state.intro = { t: 0 };
@@ -1976,7 +2124,7 @@
   function showScreen(name) {
     Object.keys(screens).forEach((k) => (screens[k].hidden = k !== name));
     if (name === "game") startLevel(); else stopLoop();
-    if (name === "reveal") setupRsvp();
+    if (name === "reveal") { setupRsvp(); setMusicLevel(0.55); }
     window.scrollTo(0, 0);
   }
 
@@ -2001,7 +2149,7 @@
   $("btn-start").addEventListener("click", () => { unlockAudio(); sfx.tap(); showScreen("game"); });
   $("btn-skip").addEventListener("click", () => { unlockAudio(); sfx.tap(); stopLoop(); wipeToReveal(); });
   $("btn-replay").addEventListener("click", () => { unlockAudio(); sfx.tap(); showScreen("game"); });
-  $("btn-mute").addEventListener("click", () => { muted = !muted; $("btn-mute").textContent = muted ? "Sound off" : "Sound on"; if (!muted) unlockAudio(); });
+  $("btn-mute").addEventListener("click", () => { muted = !muted; $("btn-mute").textContent = muted ? "Sound off" : "Sound on"; if (!muted) unlockAudio(); applyMusicLevel(); });
 
   /* ================= RSVP ================= */
   const isLocalRsvp = () => { const ep = String(config.rsvpEndpoint || "local").trim(); return !ep || ep.toLowerCase() === "local"; };
@@ -2085,7 +2233,7 @@
     damage: (n) => hurt(n || 10),
     setDanger: (v) => { state.bride.danger = v; },
     setTier: (t) => { fpS.tier = t; fpS.lockTier = true; fpBuild(); },
-    tier: () => fpS.tier, fails: () => fails, easy: () => easy,
+    tier: () => fpS.tier, music: () => ({ playing: !!musicSrc, level: musicLevel, gain: musicGain ? musicGain.gain.value : null, beat: musicBeat(), state: actx && actx.state }), fails: () => fails, easy: () => easy,
   };
 
   function boot() {

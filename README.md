@@ -13,3 +13,9 @@ All names, dates and the venue in `config.json` are placeholders. `"sample": tru
 `?q=0|1|2` forces a quality tier. Without it, the game drops a tier automatically when frames run slow.
 
 Run locally with `python3 -m http.server 8781`. The page is noindex/nofollow, with no ads, no tracking and no third-party requests.
+
+## v2: dancing + house music
+
+- Hunks now dance on the beat while they approach and while they hang around: hip sways, body rolls, finger points, shoulder shimmies and the disco point. Each hunk switches moves every 8 beats. Clothed background clubbers dance around the club too.
+- A 16-bar, 124 BPM four-on-the-floor house loop (kick, clap, hats, off-beat bass, chord stabs with sidechain pump) is synthesised on the device, so there are no audio files and nothing to license. It's rendered while the landing screen is up and starts after the first tap (iOS unlock). It plays low under the SFX and voices, dips during the fail gag and on the reveal, and follows the mute toggle. Dancers, dance-floor tiles and lights all sync to the music clock.
+- The service worker cache is bumped to `bachelorette-invite-v2`.
